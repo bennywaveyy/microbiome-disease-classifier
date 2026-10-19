@@ -6,6 +6,8 @@ The design follows the standard approach used in published microbiome-ML studies
 
 > **For the actual results, methodology, and findings on real public data (MetAML 1,709 samples + SM/FD 16S 419 samples, 2,128 total): see [FINDINGS.md](FINDINGS.md).**
 
+**About this project:** built with [Claude Code](https://claude.com/claude-code) as a coding collaborator. I directed the work: choosing which conditions and public datasets to study, making the modeling and validation decisions (multi-class vs per-disease models, cross-cohort validation, the phylogenetic GNN experiment), and interpreting the results. Claude wrote most of the implementation.
+
 ---
 
 ## Project layout
