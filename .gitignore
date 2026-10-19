@@ -1,0 +1,55 @@
+# ---------- Large raw/intermediate data (regenerable from scripts) ----------
+# Raw FASTQ downloads from ENA
+sm_data/fastq/
+sm_data/fd_fastq/
+
+# DADA2 filterAndTrim intermediates
+sm_data/filt/
+sm_data/fd_filt/
+
+# SILVA reference taxonomy (~200 MB — download via dada2_pipeline.R)
+sm_data/ref/
+
+# MetAML raw abundance dump (download via prep_metaml.py)
+raw_data/
+
+# Local demo input/output files
+demo_input.tsv
+demo_predictions.tsv
+predictions.tsv
+
+# Downloaded supplementary files and raw API dumps (parsed TSVs are kept)
+sm_data/mmc*.docx
+sm_data/mmc*.xlsx
+sm_data/sd_article.html
+sm_data/*.xml
+
+# Exploration scratch at repo root (canonical copies live in sm_data/)
+/fd_runs.tsv
+/fd2_runs.tsv
+/ssc_runs.tsv
+
+# Local Claude Code config
+.claude/
+
+# ---------- Logs ----------
+*.log
+train_run.log
+cohort_holdout.log
+sm_data/dada2_run.log
+sm_data/dada2_fd_run.log
+sm_data/phylo_gnn_run.log
+
+# ---------- Python / editor noise ----------
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+.ipynb_checkpoints/
+.vscode/
+.idea/
+
+# ---------- Env / secrets ----------
+.env
+.env.local
+*.pem

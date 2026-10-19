@@ -1,0 +1,6 @@
+,accuracy,accuracy,balanced_accuracy,balanced_accuracy,f1_macro,f1_macro,f1_weighted,f1_weighted,auroc_ovr_macro,auroc_ovr_macro
+,mean,std,mean,std,mean,std,mean,std,mean,std
+model,,,,,,,,,,
+Logistic Regression (L2),0.6384,0.0124,0.6401,0.0202,0.6042,0.0161,0.6453,0.0117,0.8919,0.0135
+MLP (PyTorch),0.7057,0.0084,0.6649,0.0278,0.6505,0.012,0.7049,0.009,0.9156,0.0135
+Random Forest,0.6519,0.0169,0.4187,0.0315,0.4555,0.0398,0.5908,0.0238,0.9123,0.008

@@ -1,0 +1,7 @@
+,pred_CRC,pred_Cirrhosis,pred_Healthy,pred_IBD,pred_Obesity,pred_T2D
+true_CRC,34,3,31,9,4,6
+true_Cirrhosis,0,101,14,0,0,3
+true_Healthy,28,25,703,29,95,64
+true_IBD,1,0,15,152,3,2
+true_Obesity,1,0,64,3,94,2
+true_T2D,3,6,77,5,10,122
