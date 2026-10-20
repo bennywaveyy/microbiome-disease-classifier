@@ -1,138 +1,109 @@
-# Gut Microbiome → Multi-Class Disease Prediction
+# Gut Microbiome Disease Classification Across Cohorts
 
-A complete, modular machine-learning pipeline for predicting disease class from gut microbiome abundance data. Includes both classic ML (Logistic Regression, Random Forest, XGBoost) and a PyTorch neural network, with proper microbiome-specific preprocessing.
+**Random cross-validation made this classifier look far better than it was. Pooling two 16S cohorts and running random 5-fold CV gave an MLP AUROC of 0.91; holding out one whole cohort at a time dropped it to 0.56. The model had learned which lab sequenced each sample, not which patients were sick.**
 
-The design follows the standard approach used in published microbiome-ML studies (e.g. Su et al. 2022, Bang et al. 2019, Li et al. 2023): per-sample relative abundances → prevalence filter → CLR transform → stratified cross-validation across multiple models.
-
-> **For the actual results, methodology, and findings on real public data (MetAML 1,709 samples + SM/FD 16S 419 samples, 2,128 total): see [FINDINGS.md](FINDINGS.md).**
+End-to-end machine learning on 2,128 public stool samples from 13 cohorts: shotgun MetaPhlAn profiles plus raw 16S V4 reads processed from FASTQ through DADA2 and SILVA, CLR-transformed, and modeled with logistic regression, random forest, a PyTorch MLP and a phylogeny-aware graph network. Full write-up: [FINDINGS.md](FINDINGS.md).
 
 **About this project:** built with [Claude Code](https://claude.com/claude-code) as a coding collaborator. I directed the work: choosing which conditions and public datasets to study, making the modeling and validation decisions (multi-class vs per-disease models, cross-cohort validation, the phylogenetic GNN experiment), and interpreting the results. Claude wrote most of the implementation.
 
 ---
 
-## Project layout
+## Key results
+
+| Question | Data | Result |
+|---|---|---|
+| Does pooling cohorts inflate accuracy? | 16S, SM + FD combined (n=419) | Yes. MLP AUROC 0.91 with random 5-fold CV vs 0.56 leave-one-cohort-out: **0.36 inflation** (0.29–0.36 across all four models) |
+| Is there real signal inside one cohort? | FD vs healthy relatives (n=388) | Yes. MLP AUROC **0.886 ± 0.029** (5-fold CV within the cohort) |
+| Does the shotgun multi-class model hold up across studies? | MetAML, 6 classes (n=1,709) | Mostly. MLP macro AUROC 0.916 (5-fold CV); leave-one-cohort-out on IBD and T2D cost only 0.03–0.04 |
+| Does a phylogeny-aware graph network help? | 16S, SM + FD (n=419) | No. AUROC 0.68 random CV, 0.52 leave-one-cohort-out, 0.47 within FD, below every simpler model |
+
+PCA on the combined 16S matrix shows the same thing directly: cohort label explains 15.8% of PC1+PC2 variance, disease label 12.8%.
+
+![PCA: cohort vs disease](sm_data/combined_out/pca_cohort_vs_disease.png)
+
+---
+
+## Datasets
+
+All public and reproducible from the accessions below.
+
+| Dataset | Condition(s) | Technology | Samples |
+|---|---|---|---|
+| MetAML / Pasolli 2016 ([SegataLab/metaml](https://github.com/SegataLab/metaml)) | Healthy, IBD, colorectal cancer (CRC), type 2 diabetes (T2D), cirrhosis, obesity | Shotgun, MetaPhlAn species | 1,709 |
+| Krausfeldt 2025 ([PRJNA1258241](https://www.ncbi.nlm.nih.gov/bioproject/1258241)) | Systemic mastocytosis (SM) vs healthy | 16S V4, paired-end MiSeq | 31 (22 SM + 9 healthy) |
+| Pinkham 2023 ([PRJNA787213](https://www.ncbi.nlm.nih.gov/bioproject/787213)) | Familial dysautonomia (FD) vs healthy relatives | 16S V4, paired-end MiSeq | 388 (198 FD + 190 healthy) |
+
+---
+
+## Repository layout
 
 ```
-microbiome_ml/
-├── data_utils.py      # Synthetic data generator + real-data loader
-├── preprocessing.py   # Prevalence filter + Centered Log-Ratio (CLR) transform
-├── models.py          # LR, Random Forest, XGBoost, PyTorch MLP
-├── train.py           # Stratified K-fold CV + metrics + feature importance
-└── README.md
+.
+├── FINDINGS.md               # full results, methods and limitations
+├── prep_metaml.py            # MetAML dump -> data/abundance.tsv + data/metadata.tsv
+├── data_utils.py             # data loaders (+ synthetic demo generator)
+├── preprocessing.py          # prevalence filter + CLR transform
+├── models.py                 # logistic regression, random forest, PyTorch MLP (+ XGBoost if installed)
+├── train.py                  # stratified 5-fold CV, metrics, feature importance
+├── eval_cohort_holdout.py    # random CV vs leave-one-cohort-out for IBD and T2D
+├── train_predictor.py        # trains the shotgun MLP on all data and saves artifacts/
+├── predict.py                # scores new samples with the trained MLP
+├── artifacts/                # trained MLP weights, scaler, label encoder, taxa list
+├── data/                     # prepared MetAML abundance + metadata
+├── results/                  # shotgun CV and cohort-holdout outputs
+└── sm_data/                  # 16S track (SM + FD)
+    ├── dada2_pipeline.R          # SM: FASTQ -> ASVs -> SILVA v138.1 genus table
+    ├── dada2_fd.R                # FD: same pipeline, primers already trimmed
+    ├── train_sm_classifier.py    # SM vs healthy, leave-one-out CV (n=31)
+    ├── combine_and_train.py      # SM + FD combined: random, leave-one-cohort-out, within-cohort CV
+    ├── per_disease_and_pca.py    # per-disease binary models + PCA figure
+    ├── train_phylo_gnn.py        # phylogeny-aware graph network (PhyloGIN)
+    └── combined_out/             # 16S metrics and PCA figure
 ```
 
 ---
 
-## Quick start
-
-### 1. Install dependencies
+## Reproducing the results
 
 ```bash
-pip install numpy pandas scikit-learn xgboost torch
+pip install numpy pandas scikit-learn torch matplotlib joblib   # xgboost optional
 ```
 
-### 2. Run the synthetic-data demo
+**Shotgun track (MetAML).** Download the MetAML `abundance.txt` into `raw_data/`, then:
 
 ```bash
-python train.py
+python prep_metaml.py
+python train.py --abundance data/abundance.tsv --metadata data/metadata.tsv --label-col disease
+python eval_cohort_holdout.py
+python train_predictor.py        # optional: build the deployable MLP
 ```
 
-This generates 600 samples (5 disease classes × 120 samples) over 300 simulated taxa, runs 5-fold stratified CV on every model, and writes results to `results/`.
-
-### 3. Run on your own data
+**16S track (SM + FD).** Needs R with the Bioconductor `dada2` package. Download the FASTQs listed in `sm_data/fastq_urls.txt` and `sm_data/fd_urls.txt`, and a SILVA v138.1 reference into `sm_data/ref/`, then:
 
 ```bash
-python train.py \
-    --abundance path/to/abundance_table.tsv \
-    --metadata  path/to/metadata.tsv \
-    --label-col disease \
-    --sample-id-col sample_id
+Rscript sm_data/dada2_pipeline.R
+Rscript sm_data/dada2_fd.R
+python sm_data/combine_and_train.py
+python sm_data/per_disease_and_pca.py
+python sm_data/train_phylo_gnn.py
 ```
 
-**Expected file formats:**
+**Score new samples** with the trained shotgun MLP:
 
-`abundance_table.tsv` — rows = samples, columns = taxa. First column is the sample ID.
+```bash
+python predict.py --abundance new_samples.tsv
+```
 
-| sample_id | s__Bacteroides_fragilis | s__Faecalibacterium_prausnitzii | … |
-|-----------|------------------------:|-------------------------------:|---|
-| S001      | 0.0421                  | 0.1183                         | … |
-| S002      | 0.0033                  | 0.0892                         | … |
+Input is rows = samples, columns = MetaPhlAn-style taxa, first column = sample ID. Missing taxa are filled with 0 and extra taxa are dropped.
 
-`metadata.tsv` — one row per sample, must contain `sample_id` and the label column:
-
-| sample_id | disease |
-|-----------|---------|
-| S001      | IBD     |
-| S002      | Healthy |
-
-If your abundance file is **transposed** (taxa as rows, samples as columns — common in MetaPhlAn / Kraken outputs), transpose it before running. Many public datasets like [curatedMetagenomicData](https://waldronlab.io/curatedMetagenomicData/) need this.
+Running `python train.py` with no arguments runs a synthetic demo (5 classes × 120 samples × 300 taxa) to check the install.
 
 ---
 
-## What the pipeline does
+## Method notes
 
-### Preprocessing (`preprocessing.py`)
-
-Microbiome data is **compositional** — each sample's abundances sum to 1, so taxa are not independent. Standard scalers/correlations applied to raw relative abundances produce spurious signals. Two steps fix this:
-
-1. **Prevalence filter.** Drop taxa present in fewer than 10% of samples (default). This removes noisy, sparse features that hurt generalization.
-2. **CLR transform.** For each sample, replace each `x_i` with `log(x_i) − mean(log(x))`. This puts the data in real Euclidean space where standard ML works correctly. A small pseudocount handles zeros.
-
-### Models (`models.py`)
-
-| Model | Why it's here |
-|-------|---------------|
-| Logistic Regression (L2) | Strong, interpretable linear baseline. Wrapped in a scaling pipeline. |
-| Random Forest | Robust nonlinear model, gives feature importances. |
-| XGBoost | Gradient boosting; usually the strongest classic-ML model on tabular data. |
-| MLP (PyTorch) | Small regularized neural net. Microbiome datasets are usually too small for deep nets, but a 2-layer MLP is a fair point of comparison. |
-
-The PyTorch MLP is wrapped in a scikit-learn-compatible class so it plugs into the same CV loop. It uses class-weighted cross-entropy loss to handle imbalanced classes.
-
-### Cross-validation & metrics (`train.py`)
-
-5-fold **stratified** K-fold (preserves class proportions in every fold). Reports:
-
-- Accuracy
-- Balanced accuracy (mean of per-class recall — important when classes are imbalanced)
-- Macro and weighted F1
-- One-vs-rest macro AUROC
-
-Plus, for the best model: a full classification report and aggregated confusion matrix from out-of-fold predictions.
-
-### Feature importance
-
-After CV, a Random Forest is fit on the full dataset to rank the most discriminative taxa. These are the candidate **microbial biomarkers** worth investigating biologically.
-
----
-
-## Realistic expectations
-
-Published cross-cohort multi-disease classifiers in the gut microbiome literature typically report **AUROC of 0.69–0.91** depending on the disease. Performance is generally:
-
-- **High** for intestinal diseases (IBD, CRC) — strong, consistent dysbiosis signatures.
-- **Moderate** for metabolic diseases (T2D, obesity) — signatures vary across cohorts.
-- **Lower** for neurological / psychiatric conditions.
-
-If you're running on real data, expect a noticeable drop when validating on a different cohort than the training one (this is called the **batch effect** problem and is the central open challenge in microbiome ML).
-
----
-
-## Where to get real data
-
-- **curatedMetagenomicData** (R/Bioconductor) — thousands of harmonized samples across many diseases.
-- **MGnify** (EBI) — public metagenomic studies.
-- **NCBI SRA / ENA** — raw reads from individual studies; you'd need to run a profiler like MetaPhlAn or Kraken first to get an abundance table.
-
-For a quick start with real data, the curatedMetagenomicData R package can export abundance + metadata as TSVs that drop straight into this pipeline.
-
----
-
-## Outputs
-
-After running, `results/` contains:
-
-- `cv_metrics.csv` — per-fold metrics for every model
-- `cv_summary.csv` — mean ± std summary across folds
-- `confusion_<model>.csv` — aggregated confusion matrix
-- `top_features.csv` — top 25 discriminative taxa
+- **Compositional data.** Each sample's abundances sum to 1, so taxa aren't independent. Taxa present in fewer than 10% of samples are dropped, then a centered log-ratio (CLR) transform with a small pseudocount moves the data into Euclidean space.
+- **Class imbalance** is handled with class-weighted losses. Oversampling (SMOTE) was avoided because at n=22 it produces unrealistic synthetic samples.
+- **Metrics:** accuracy, balanced accuracy, macro and weighted F1, one-vs-rest macro AUROC.
+- **Validation:** every headline number states its split. Random stratified 5-fold CV is reported next to leave-one-cohort-out wherever a disease spans more than one study.
+- **Not done:** formal batch correction (ConQuR, MMUPHin) was out of scope.

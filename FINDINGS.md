@@ -4,7 +4,7 @@ End-to-end study of how reliably gut microbiome composition can predict disease,
 
 ## Headline result
 
-**Combining cohorts inflates a microbiome classifier's apparent accuracy by ~0.36 AUROC. Naive 5-fold CV reports AUROC 0.91; honest leave-one-cohort-out collapses to 0.55.** The within-cohort signal is real for diseases with strong gut effects (Familial Dysautonomia, AUROC **0.886**) but unreliable for diseases that only modestly perturb the gut at small sample sizes (Systemic Mastocytosis, n=31, AUROC 0.80 ± 0.26).
+**Combining cohorts inflates a microbiome classifier's apparent accuracy by ~0.36 AUROC. For the MLP, naive 5-fold CV reports AUROC 0.91; honest leave-one-cohort-out collapses to 0.56 (inflation 0.29–0.36 across all four models).** The within-cohort signal is real for diseases with strong gut effects (Familial Dysautonomia, MLP AUROC **0.886 ± 0.029**) but unreliable for diseases that only modestly perturb the gut at small sample sizes (Systemic Mastocytosis, n=31, random forest AUROC 0.80 ± 0.26).
 
 The gap between those two numbers is the project — it's the difference between a number you publish and a number you actually believe.
 
@@ -41,8 +41,9 @@ Two parallel tracks.
 3. Combine cohorts at the genus level (union of features, fill missing with 0).
 4. Run multi-class CV in three modes: random 5-fold, leave-one-cohort-out, within-cohort.
 5. Per-disease binary classifiers as the honest comparator.
+6. A phylogeny-aware graph network (PhyloGIN) as an extra comparator.
 
-Code: [`prep_metaml.py`](prep_metaml.py), [`preprocessing.py`](preprocessing.py), [`models.py`](models.py), [`train.py`](train.py), [`predict.py`](predict.py), [`sm_data/dada2_pipeline.R`](sm_data/dada2_pipeline.R), [`sm_data/dada2_fd.R`](sm_data/dada2_fd.R), [`sm_data/combine_and_train.py`](sm_data/combine_and_train.py), [`sm_data/per_disease_and_pca.py`](sm_data/per_disease_and_pca.py).
+Code: [`prep_metaml.py`](prep_metaml.py), [`preprocessing.py`](preprocessing.py), [`models.py`](models.py), [`train.py`](train.py), [`predict.py`](predict.py), [`sm_data/dada2_pipeline.R`](sm_data/dada2_pipeline.R), [`sm_data/dada2_fd.R`](sm_data/dada2_fd.R), [`eval_cohort_holdout.py`](eval_cohort_holdout.py), [`sm_data/combine_and_train.py`](sm_data/combine_and_train.py), [`sm_data/per_disease_and_pca.py`](sm_data/per_disease_and_pca.py), [`sm_data/train_phylo_gnn.py`](sm_data/train_phylo_gnn.py).
 
 ---
 
@@ -62,7 +63,7 @@ Per-class F1 follows the published pattern exactly: gut-localized diseases (IBD 
 
 ### 2. Cross-cohort honesty (shotgun)
 
-For the two diseases with multi-cohort coverage, compared random-CV vs leave-one-cohort-out (LOCO):
+For the two diseases with multi-cohort coverage, compared random-CV vs leave-one-cohort-out (LOCO), disease vs Healthy with L2 logistic regression ([`eval_cohort_holdout.py`](eval_cohort_holdout.py)):
 
 | Disease | Random 5-fold AUROC | LOCO AUROC | Inflation |
 |---|---|---|---|
@@ -75,11 +76,15 @@ For diseases tested across studies, batch-effect inflation was small (~3–4 AUR
 
 This is where the cohort-confound becomes dramatic. SM samples come exclusively from one study (NIH 2017), FD from another (NYU 2019–2020).
 
-| Evaluation mode | Best AUROC (OvR macro) | Interpretation |
-|---|---|---|
-| Random 5-fold CV | **0.91** | Inflated — model learns cohort fingerprints |
-| Leave-one-cohort-out | **0.55** | Honest — collapses to ~random for held-out disease |
-| Within-cohort (per-disease binary) | FD 0.886, SM 0.80 ± 0.26 | The numbers worth quoting |
+Mean AUROC (OvR macro) across folds, from [`sm_data/combine_and_train.py`](sm_data/combine_and_train.py):
+
+| Evaluation mode | MLP | LR-L1 | LR-L2 | Random forest | Interpretation |
+|---|---|---|---|---|---|
+| Random 5-fold CV | **0.913** | 0.908 | 0.903 | 0.901 | Inflated — model learns cohort fingerprints |
+| Leave-one-cohort-out | **0.556** | 0.605 | 0.615 | 0.559 | Honest — collapses to ~random for held-out disease |
+| Inflation | **0.36** | 0.30 | 0.29 | 0.34 | |
+| Within FD cohort (5-fold) | **0.886 ± 0.029** | 0.846 | 0.849 | 0.855 | The numbers worth quoting |
+| Within SM cohort (5-fold) | 0.60 ± 0.30 | 0.61 | 0.66 | **0.80 ± 0.29** | Too small (n=31) to trust |
 
 PCA on the combined CLR matrix confirms it visually: cohort label explains 15.8% of PC1+PC2 variance vs 12.8% for disease label. Where a sample sits in PC space is more determined by which lab sequenced it than whether the patient was sick.
 
@@ -87,12 +92,27 @@ PCA on the combined CLR matrix confirms it visually: cohort label explains 15.8%
 
 ### 4. Per-disease binary models (within-cohort)
 
+Each disease vs its own healthy controls, trained only on its own cohort ([`sm_data/per_disease_and_pca.py`](sm_data/per_disease_and_pca.py)). This script compares logistic regression and random forest only, so its best FD number (random forest, 0.856) matches the random forest row above (0.855); the MLP is what reaches 0.886.
+
 | Disease | Cohort | n | Best Model | AUROC |
 |---|---|---|---|---|
 | FD vs Healthy | FD (n=388) | 198+190 | Random Forest | **0.856 ± 0.019** |
 | SM vs Healthy | SM (n=31) | 22+9 | Random Forest | 0.80 ± 0.26 |
 
 The std collapsing from ±0.26 to ±0.019 is the n=22 → n=388 difference made visible. **FD is a publication-quality result. SM at n=31 is sampling noise.**
+
+### 5. Phylogeny-aware graph network (negative result)
+
+Tested whether building the bacterial family tree into the model helps. PhyloGIN ([`sm_data/train_phylo_gnn.py`](sm_data/train_phylo_gnn.py)) embeds each genus, sum-aggregates genera into families and families into phyla (GIN-style), and classifies from the concatenated genus, family and phylum embeddings. Same data and splits as section 3.
+
+| Evaluation mode | PhyloGIN AUROC | Best simple model |
+|---|---|---|
+| Random 5-fold CV | 0.680 ± 0.046 | 0.913 (MLP) |
+| Leave-one-cohort-out | 0.518 ± 0.025 | 0.615 (LR-L2) |
+| Within FD cohort | 0.473 ± 0.056 | 0.886 (MLP) |
+| Within SM cohort | 0.655 ± 0.174 | 0.80 (random forest) |
+
+The graph network lost to every simpler model in every mode, and fell to chance within the FD cohort where a plain MLP reached 0.886. With a few hundred samples, the added structure cost more than it gave. The baselines are the models to quote.
 
 ---
 
